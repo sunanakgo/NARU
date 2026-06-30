@@ -53,6 +53,12 @@ import {
 
 const CODEX_BLUE = "#7A9DFF";
 
+// Composer font size — fixed, INDEPENDENT of the terminal "글자 크기" slider
+// (settings.fontSize). The text box is chat UI, not terminal output, so
+// resizing the terminal must not reflow it. Ghost overlay + textarea must
+// share this exact value to keep the suggestion aligned with typed text.
+const COMPOSER_FONT_SIZE = 13;
+
 const isAgentBrand = (brand: string | undefined): brand is AgentCli =>
   brand === "claude" || brand === "codex" || brand === "opencode";
 
@@ -114,7 +120,6 @@ export const InputBar = forwardRef<
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
   const lastCwd = useRef<string | null>(null);
-  const fontSize = useSettings((s) => s.fontSize);
   const agentCli = useSettings((s) => s.agentCli);
   const setSettings = useSettings((s) => s.set);
   const recordCommand = useCommandHistory((s) => s.record);
@@ -723,7 +728,7 @@ export const InputBar = forwardRef<
             {ghost && (
               <div
                 aria-hidden
-                style={{ fontFamily: "var(--app-font)", fontSize }}
+                style={{ fontFamily: "var(--app-font)", fontSize: COMPOSER_FONT_SIZE }}
                 className="pointer-events-none absolute inset-0 overflow-hidden px-1.5 py-1 break-words whitespace-pre-wrap"
               >
                 <span className="invisible">{text}</span>
@@ -941,9 +946,10 @@ export const InputBar = forwardRef<
             rows={Math.min(8, Math.max(3, text.split("\n").length))}
             aria-label="명령 입력"
             spellCheck={false}
-            // The composer follows the app/UI font (must match the ghost
-            // overlay above so the suggestion stays aligned with typed text).
-            style={{ fontFamily: "var(--app-font)", fontSize }}
+            // Fixed composer size (COMPOSER_FONT_SIZE) — independent of the
+            // terminal font slider; must match the ghost overlay above so the
+            // suggestion stays aligned with typed text.
+            style={{ fontFamily: "var(--app-font)", fontSize: COMPOSER_FONT_SIZE }}
             className={cn(
               "min-h-7 w-full resize-none border-0 bg-transparent px-1.5 py-1 outline-none",
               "placeholder:text-muted-foreground/50"

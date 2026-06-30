@@ -1,6 +1,6 @@
 [package]
 name = "naru"
-version = "0.1.9"
+version = "0.1.10"
 description = "NARU — AI agent control-tower terminal workspace"
 authors = ["you"]
 edition = "2021"
@@ -41,6 +41,12 @@ tauri-plugin-single-instance = "2.4.2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 url = "2"
+
+# macOS-only: programmatically center the native traffic lights in our custom
+# 38px titlebar (and re-apply on resize, which the trafficLightPosition config
+# alone doesn't survive — it resets on fullscreen toggle).
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-decorum = "1"
 
 [profile.release]
 opt-level = "s" # desktop app: size over the last few % of speed

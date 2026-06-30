@@ -93,17 +93,57 @@ pub fn run() {
         return;
     }
 
-    tauri::Builder::default()
-        // MUST be registered first. A second launch focuses the existing
-        // window instead of starting another process — two instances share
-        // app_data (kv, session-cwds, agent-sessions) and %TEMP% control
-        // files with last-writer-wins semantics, silently corrupting state.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    // `mut` is used only in release (the single-instance block below reassigns
+    // it); debug skips that block, so allow the otherwise-unused mut.
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance MUST be registered first. A second launch focuses the
+    // existing window instead of starting another process — two instances share
+    // app_data (kv, session-cwds, agent-sessions) and %TEMP% control files with
+    // last-writer-wins semantics, silently corrupting state. Skipped under
+    // `tauri dev` (debug) so a dev window can open ALONGSIDE an installed release
+    // build (same bundle id) for UI iteration — release always keeps it.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.unminimize();
                 let _ = win.set_focus();
             }
-        }))
+        }));
+    }
+
+    // macOS: vertically center the native traffic lights in our custom 38px
+    // titlebar so they line up with the flexbox-centered chrome icons. The inset
+    // MUST be applied on window-ready — doing it in `setup()` is too early and the
+    // value silently doesn't stick (the buttons stay at the config inset). decorum's
+    // positioner lands the button-group center at (button_height + y)/2 + 4 px from
+    // the window top; y=18 lands it on the 19px midline (measured: y=16 sat 2px high,
+    // y=20 sat 2px low). Re-applied on resize/fullscreen in the setup hook (macOS
+    // snaps the buttons back to default on those events).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("naru-trafficlights")
+                .on_window_ready(|window| {
+                    use tauri::Manager;
+                    use tauri_plugin_decorum::WebviewWindowExt;
+                    if let Some(w) = window.get_webview_window("main") {
+                        // The window is created hidden (visible:false in
+                        // tauri.macos.conf.json) so the traffic lights never flash
+                        // at the config inset before we recentre them — position
+                        // first, THEN reveal. The dark backgroundColor means no
+                        // white flash in the gap before content paints.
+                        let _ = w.set_traffic_lights_inset(12.0, 18.0);
+                        let _ = w.show();
+                    }
+                })
+                .build(),
+        );
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -123,6 +163,23 @@ pub fn run() {
         .setup(|app| {
             // Background monitor for idle/waiting transitions (PLAN §5).
             StatusEngine::start_monitor(app.handle().clone());
+
+            // macOS: keep the traffic lights centered (initial placement happens
+            // on window-ready, registered above) by re-applying the inset on every
+            // resize — including fullscreen toggles, which macOS uses to snap the
+            // buttons back to their default inset.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_decorum::WebviewWindowExt;
+                if let Some(win) = app.get_webview_window("main") {
+                    let w = win.clone();
+                    win.on_window_event(move |event| {
+                        if matches!(event, tauri::WindowEvent::Resized(_)) {
+                            let _ = w.set_traffic_lights_inset(12.0, 18.0);
+                        }
+                    });
+                }
+            }
 
             // Warm the PATH-commands cache off the command thread — the first
             // scan walks every PATH dir and would otherwise block the first
