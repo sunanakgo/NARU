@@ -114,33 +114,16 @@ pub fn run() {
         }));
     }
 
-    // macOS: vertically center the native traffic lights in our custom 38px
-    // titlebar so they line up with the flexbox-centered chrome icons. The inset
-    // MUST be applied on window-ready — doing it in `setup()` is too early and the
-    // value silently doesn't stick (the buttons stay at the config inset). decorum's
-    // positioner lands the button-group center at (button_height + y)/2 + 4 px from
-    // the window top; y=18 lands it on the 19px midline (measured: y=16 sat 2px high,
-    // y=20 sat 2px low). Re-applied on resize/fullscreen in the setup hook (macOS
-    // snaps the buttons back to default on those events).
+    // macOS: center the native traffic lights in our custom 38px titlebar to line
+    // up with the flexbox-centered chrome icons. decorum's plugin installs an
+    // NSWindow delegate that repositions the buttons SYNCHRONOUSLY inside
+    // windowDidResize / windowDidExitFullScreen — so they don't flicker up-then-down
+    // during a resize the way an async Tauri WindowEvent re-apply does. (We
+    // previously drove set_traffic_lights_inset by hand on window-ready + resize;
+    // that positioned them but flickered while resizing.)
     #[cfg(target_os = "macos")]
     {
-        builder = builder.plugin(
-            tauri::plugin::Builder::<tauri::Wry>::new("naru-trafficlights")
-                .on_window_ready(|window| {
-                    use tauri::Manager;
-                    use tauri_plugin_decorum::WebviewWindowExt;
-                    if let Some(w) = window.get_webview_window("main") {
-                        // NOTE: do NOT create the window hidden and show() here —
-                        // a hidden window's on_window_ready may never fire on
-                        // macOS, leaving the app running with no visible window.
-                        // The window stays visible; the traffic lights briefly
-                        // appear at the config inset, then recentre. Minor flash,
-                        // but the window is guaranteed to show.
-                        let _ = w.set_traffic_lights_inset(12.0, 18.0);
-                    }
-                })
-                .build(),
-        );
+        builder = builder.plugin(tauri_plugin_decorum::init());
     }
 
     builder
@@ -163,23 +146,6 @@ pub fn run() {
         .setup(|app| {
             // Background monitor for idle/waiting transitions (PLAN §5).
             StatusEngine::start_monitor(app.handle().clone());
-
-            // macOS: keep the traffic lights centered (initial placement happens
-            // on window-ready, registered above) by re-applying the inset on every
-            // resize — including fullscreen toggles, which macOS uses to snap the
-            // buttons back to their default inset.
-            #[cfg(target_os = "macos")]
-            {
-                use tauri_plugin_decorum::WebviewWindowExt;
-                if let Some(win) = app.get_webview_window("main") {
-                    let w = win.clone();
-                    win.on_window_event(move |event| {
-                        if matches!(event, tauri::WindowEvent::Resized(_)) {
-                            let _ = w.set_traffic_lights_inset(12.0, 18.0);
-                        }
-                    });
-                }
-            }
 
             // Warm the PATH-commands cache off the command thread — the first
             // scan walks every PATH dir and would otherwise block the first

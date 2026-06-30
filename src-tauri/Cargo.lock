@@ -2435,7 +2435,7 @@ dependencies = [
 
 [[package]]
 name = "naru"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "axum",
  "base64 0.22.1",
