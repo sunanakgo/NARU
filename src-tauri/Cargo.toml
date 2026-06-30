@@ -1,6 +1,6 @@
 [package]
 name = "naru"
-version = "0.1.10"
+version = "0.1.11"
 description = "NARU — AI agent control-tower terminal workspace"
 authors = ["you"]
 edition = "2021"

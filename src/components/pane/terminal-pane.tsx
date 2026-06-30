@@ -428,6 +428,24 @@ function TerminalPaneImpl({
     };
     container.addEventListener("mousedown", onEmptyAreaMouseDown);
 
+    // After a drag-selection ON the grid, focus bounces between xterm's helper
+    // textarea and the composer, and xterm often wins the FINAL focus — so the
+    // next keystrokes (⌘/Ctrl+C copy, ⌘/Ctrl+V paste, Backspace) silently go to
+    // the grid/PTY instead of the composer and appear to "do nothing". Once the
+    // drag ends, hand focus back to the composer when it owns typing. The xterm
+    // selection survives the refocus, so ⌘/Ctrl+C in the composer still copies
+    // it (copyGridSelection reads term.getSelection()).
+    const onGridMouseUp = () => {
+      if (
+        inputBarRef.current &&
+        inputRef.current &&
+        (!altRef.current || agentAltScreenRef.current)
+      ) {
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+    };
+    container.addEventListener("mouseup", onGridMouseUp);
+
     // Ctrl/⌘+F anywhere in the pane (grid OR input bar) opens the search
     // overlay. Capture phase so xterm's helper textarea never sees the chord.
     const root = rootRef.current;
@@ -650,6 +668,7 @@ function TerminalPaneImpl({
       promptModeUnsub();
       term.textarea?.removeEventListener("focus", onTermFocus);
       container.removeEventListener("mousedown", onEmptyAreaMouseDown);
+      container.removeEventListener("mouseup", onGridMouseUp);
       root?.removeEventListener("keydown", onSearchKey, true);
       searchRef.current = null;
       ro.disconnect();
