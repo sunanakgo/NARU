@@ -1,0 +1,44 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Design handoff bundle (reference assets, not source)
+.design/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Build artifacts (stray tsc -b output)
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Agent / editor session-local config
+.claude/
+.codex/
+
+# Planning & design docs — kept locally, not shipped in the public repo
+doc/
+
+# Release signing secrets — NEVER commit (minisign updater key + Apple cert pw)
+.env.release
+*.p12
+*.key

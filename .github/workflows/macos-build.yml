@@ -1,0 +1,48 @@
+name: macOS build check
+
+# NARU is developed on Windows, so its macOS-specific code paths
+# (#[cfg(target_os = "macos")] / #[cfg(not(windows))] branches: lsof port
+# scanning, Unix tree-kill, the `open`-based "open in app", zsh/bash shell
+# integration) are never type-checked by the local Windows `cargo clippy`.
+# This runs the same `npm run check` gate ON macOS so those branches are
+# actually compiled + linted, then a full release build to prove the bundle
+# links under the release profile (lto, panic = "abort").
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # tsc + vite build + cargo clippy --all-targets -- -D warnings.
+      # The clippy step is what type-checks the macOS-only cfg branches.
+      - name: Check (type-check, build, lint)
+        run: npm run check
+
+      # Full release compile + link (skips dmg/app packaging + code signing,
+      # which we don't configure — this only needs to prove it builds).
+      - name: Release build (unsigned, no bundle)
+        run: npm run tauri build -- --no-bundle

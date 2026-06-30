@@ -1,0 +1,147 @@
+name: Release
+
+# Build the Windows + macOS bundles and publish them (plus the signed
+# `latest.json` the in-app updater polls) to a single GitHub Release.
+# Fires when a `v*` tag is pushed; can also be run by hand against an
+# existing tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build & release (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Each matrix entry builds one platform/arch and uploads its bundles +
+    # updater artifacts to the same release/tag. tauri-action merges every
+    # platform into the release's shared `latest.json`. max-parallel: 1
+    # serialises that read-modify-write so two jobs can't clobber each
+    # other's entry in latest.json.
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: ""
+            args: ""
+          - platform: macos-latest # Apple Silicon (arm64)
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest # Intel (x86_64), cross-compiled
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # macOS code signing with our STABLE self-signed cert (see
+      # scripts/gen-macos-signing-cert.sh). We set up the keychain ourselves
+      # rather than letting tauri-action do it, because a self-signed cert is
+      # NOT a "valid" codesigning identity until it's trusted — and
+      # tauri-bundler resolves identities via `security find-identity -v`, which
+      # lists only valid (trusted) ones. tauri-action only imports the cert
+      # (no trust step), so its signing failed with "failed to resolve signing
+      # identity". Here we import the identity AND trust it as a code-signing
+      # root, so `find-identity -v` lists it and Tauri can sign the .app + its
+      # .app.tar.gz updater artifact. Reusing ONE cert across releases keeps the
+      # app's code-signing requirement constant, so Full Disk Access, Keychain
+      # access (Claude usage credentials) and notification permission survive
+      # in-app updates instead of resetting the way ad-hoc signing forced.
+      - name: Set up self-signed code-signing keychain (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CERT_P12="$RUNNER_TEMP/naru-cert.p12"
+          CERT_PEM="$RUNNER_TEMP/naru-cert.pem"
+          KEYCHAIN="$RUNNER_TEMP/naru-signing.keychain-db"
+          KEYCHAIN_PW="$(openssl rand -base64 24)"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_P12"
+
+          # Public cert, for the trust step. The p12 is in the legacy format
+          # (minted by LibreSSL): OpenSSL 3 needs -legacy, LibreSSL rejects the
+          # flag — so try -legacy first, then fall back to plain.
+          openssl pkcs12 -legacy -in "$CERT_P12" -clcerts -nokeys \
+            -passin "pass:$APPLE_CERTIFICATE_PASSWORD" -out "$CERT_PEM" 2>/dev/null \
+          || openssl pkcs12 -in "$CERT_P12" -clcerts -nokeys \
+            -passin "pass:$APPLE_CERTIFICATE_PASSWORD" -out "$CERT_PEM"
+
+          # Dedicated keychain holding the identity (private key + cert).
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$CERT_P12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          # Let codesign use the private key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          # Put our keychain first in the user search list + make it default.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed -e 's/[" ]//g')
+          security default-keychain -s "$KEYCHAIN"
+          # Trust the self-signed cert as a code-signing root (admin domain;
+          # sudo is passwordless on the runner). Without this, find-identity -v
+          # reports 0 valid identities.
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$CERT_PEM"
+
+          echo "--- valid codesigning identities ---"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      # Builds the platform bundles (NSIS/MSI on Windows, .app/.dmg on macOS),
+      # signs the updater artifacts with the repo's private key, and uploads
+      # everything — including the merged latest.json — to a non-draft release
+      # so `releases/latest/download/latest.json` resolves. On macOS, Tauri
+      # reads APPLE_SIGNING_IDENTITY and signs against the trusted identity set
+      # up by the step above (we deliberately do NOT pass APPLE_CERTIFICATE here,
+      # so tauri-action doesn't create a second, untrusted keychain). No
+      # APPLE_ID is set, so it signs without notarizing — fresh installs still
+      # see a Gatekeeper warning; only update-to-update continuity is fixed.
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: "NARU ${{ github.event.inputs.tag || github.ref_name }}"
+          releaseBody: "Automated build. Existing installs will see the in-app update button."
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+        # Public repo: tauri-action writes browser `releases/download/...` URLs
+        # into latest.json, which are directly fetchable — no auth, no URL
+        # rewriting, no PAT in the app. (The private-repo `finalize` job that
+        # rewrote these to authenticated API asset URLs is no longer needed.)
