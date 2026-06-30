@@ -24,6 +24,13 @@ jobs:
     # platform into the release's shared `latest.json`. max-parallel: 1
     # serialises that read-modify-write so two jobs can't clobber each
     # other's entry in latest.json.
+    #
+    # Only two platforms ship: Windows x64 and macOS Apple Silicon. The
+    # USER-FACING installers are NARU_*_x64-setup.exe and NARU_*_aarch64.dmg;
+    # the rest of each release's assets (latest.json + the *-setup.exe.sig /
+    # *.app.tar.gz + .sig) are the updater's version-check plumbing and must
+    # stay — the macOS in-app updater swaps the app via the .app.tar.gz, not
+    # the .dmg. macOS Intel is intentionally not built.
     strategy:
       max-parallel: 1
       fail-fast: false
@@ -35,9 +42,6 @@ jobs:
           - platform: macos-latest # Apple Silicon (arm64)
             target: aarch64-apple-darwin
             args: "--target aarch64-apple-darwin"
-          - platform: macos-latest # Intel (x86_64), cross-compiled
-            target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
     steps:
