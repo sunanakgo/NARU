@@ -130,13 +130,13 @@ pub fn run() {
                     use tauri::Manager;
                     use tauri_plugin_decorum::WebviewWindowExt;
                     if let Some(w) = window.get_webview_window("main") {
-                        // The window is created hidden (visible:false in
-                        // tauri.macos.conf.json) so the traffic lights never flash
-                        // at the config inset before we recentre them — position
-                        // first, THEN reveal. The dark backgroundColor means no
-                        // white flash in the gap before content paints.
+                        // NOTE: do NOT create the window hidden and show() here —
+                        // a hidden window's on_window_ready may never fire on
+                        // macOS, leaving the app running with no visible window.
+                        // The window stays visible; the traffic lights briefly
+                        // appear at the config inset, then recentre. Minor flash,
+                        // but the window is guaranteed to show.
                         let _ = w.set_traffic_lights_inset(12.0, 18.0);
-                        let _ = w.show();
                     }
                 })
                 .build(),
